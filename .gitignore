@@ -30,3 +30,7 @@
 *.exe
 *.out
 *.app
+
+.vim
+compile_commands.json
+.cache
