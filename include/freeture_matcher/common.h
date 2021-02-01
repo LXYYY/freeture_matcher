@@ -7,6 +7,7 @@
 #include <voxblox/core/common.h>
 #include <voxblox/core/voxel.h>
 
+#include <set>
 #include <vector>
 
 namespace voxblox {
@@ -20,7 +21,9 @@ struct TensorVoxelType {
 };
 typedef TensorVoxelType<Eigen::Vector3f> GradVoxel;
 typedef TensorVoxelType<float> DistVoxel;
-typedef TensorVoxelType<float> DetVoxel;
+struct DetVoxel : TensorVoxelType<float> {
+  bool maximum = false, minimum = false;
+};
 struct SkVoxel : TensorVoxelType<Eigen::Matrix<float, 3, 4>> {
   std::vector<Eigen::Vector3f> gk;
   size_t descriptor_id;

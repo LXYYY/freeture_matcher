@@ -94,10 +94,11 @@ void FreetureExtractor::convolveLayerTsdf(const Layer<TsdfVoxel>& in_layer,
                 std::placeholders::_3));
 }
 
-template <typename InVoxelT, typename OutVoxelT, typename KernelT>
+template <typename InVoxelT, typename OutVoxelT, typename KernelT,
+          typename GlobalIndicesT>
 void FreetureExtractor::convolveVoxel(
     const Layer<InVoxelT>& in_layer, Layer<OutVoxelT>* out_layer,
-    const GlobalIndexVector& global_indices, KernelT kernel,
+    const GlobalIndicesT& global_indices, KernelT kernel,
     GlobalIndexVector offsets, ConvFunc<InVoxelT, OutVoxelT> conv_func,
     PostProcFunc<InVoxelT, OutVoxelT> post_func, bool ignore_invalid) {
   for (auto const& global_index : global_indices) {

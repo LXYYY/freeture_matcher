@@ -9,6 +9,7 @@
 
 #include <math.h>
 #include <functional>
+#include <limits>
 #include <vector>
 
 #include "freeture_matcher/common.h"
@@ -26,10 +27,10 @@ class FreetureExtractor {
   friend inline std::ostream& operator<<(std::ostream& s, const Config& v) {
     s << std::endl
       << "FreetureExtractor using Config:" << std::endl
-      << "  verbose:" << v.verbose << std::endl
-      << "  radius_feature" << v.radius_feature << std::endl
-      << "  n_div" << v.n_div << std::endl
-      << "  radius_local_extremum" << v.radius_local_extremum << std::endl
+      << "  verbose: " << v.verbose << std::endl
+      << "  radius_feature: " << v.radius_feature << std::endl
+      << "  n_div: " << v.n_div << std::endl
+      << "  radius_local_extremum: " << v.radius_local_extremum << std::endl
       << "-------------------------------------------" << std::endl;
     return (s);
   }
@@ -164,19 +165,19 @@ class FreetureExtractor {
       }
     }
 
-    detectKeypointsAndComputeDescriptors(det_layer, grad_layer, tsdf_layer);
+    detectKeypointsAndComputeDescriptors(&det_layer, grad_layer, tsdf_layer);
   }
 
   void detectKeypointsAndComputeDescriptors(
-      const Layer<DetVoxel>& det_layer, const Layer<GradVoxel>& grad_layer,
+      Layer<DetVoxel>* det_layer, const Layer<GradVoxel>& grad_layer,
       const Layer<TsdfVoxel>& tsdf_layer) {
-    Layer<SkVoxel> sk_layer(det_layer.voxel_size(),
-                            det_layer.voxels_per_side());
-    GlobalIndexVector keypoint_ids;
+    Layer<SkVoxel> sk_layer(det_layer->voxel_size(),
+                            det_layer->voxels_per_side());
+    LongIndexSet keypoint_ids;
     BlockIndexList grad_blocks;
-    det_layer.getAllAllocatedBlocks(&grad_blocks);
+    det_layer->getAllAllocatedBlocks(&grad_blocks);
     for (auto const& block_index : grad_blocks) {
-      auto det_block = det_layer.getBlockPtrByIndex(block_index);
+      auto det_block = det_layer->getBlockPtrByIndex(block_index);
       if (!det_block) continue;
 
       sk_layer.allocateBlockPtrByIndex(block_index);
@@ -191,30 +192,63 @@ class FreetureExtractor {
         VoxelIndex voxel_index =
             det_block->computeVoxelIndexFromLinearIndex(lin_index);
         GlobalIndex global_index = getGlobalVoxelIndexFromBlockAndVoxelIndex(
-            block_index, voxel_index, det_layer.voxels_per_side());
+            block_index, voxel_index, det_layer->voxels_per_side());
 
         HessianMatrix h;
-        bool local_max = true, local_min = true;
+        DetVoxel::ValueT maximum = std::numeric_limits<DetVoxel::ValueT>::min(),
+                         minimum = std::numeric_limits<DetVoxel::ValueT>::max();
+        GlobalIndex max_index, min_index;
+        GlobalIndexVector max_indices, min_indices;
+        std::vector<DetVoxel::ValueT> max_values, min_values;
+        bool found_any = false;
         for (unsigned int idx = 0; idx < kLocalMaxOffset.size(); ++idx) {
-          const GlobalIndex& neighbor_index =
-              global_index + kLocalMaxOffset[idx];
+          GlobalIndex neighbor_index = global_index + kLocalMaxOffset[idx];
 
-          const DetVoxel* neighbor_voxel =
-              det_layer.getVoxelPtrByGlobalIndex(neighbor_index);
+          DetVoxel* neighbor_voxel =
+              det_layer->getVoxelPtrByGlobalIndex(neighbor_index);
           if (!neighbor_voxel) continue;
+
+          if (neighbor_voxel->maximum) {
+            max_indices.emplace_back(neighbor_index);
+            max_values.emplace_back(neighbor_voxel->value);
+          }
+          if (neighbor_voxel->minimum) {
+            min_indices.emplace_back(neighbor_index);
+            min_values.emplace_back(neighbor_voxel->value);
+          }
+
           if (neighbor_voxel->valid) {
-            if (neighbor_voxel->value > det_voxel.value) {
-              local_max = false;
+            neighbor_voxel->valid = false;
+            CHECK_GT(neighbor_voxel->value,
+                     std::numeric_limits<DetVoxel::ValueT>::min());
+            if (neighbor_voxel->value > maximum) {
+              maximum = neighbor_voxel->value;
+              max_index = neighbor_index;
+              found_any = true;
             }
-            if (neighbor_voxel->value < det_voxel.value) {
-              local_min = false;
+            if (neighbor_voxel->value < minimum) {
+              minimum = neighbor_voxel->value;
+              min_index = neighbor_index;
+              found_any = true;
             }
-            if (!local_min && !local_max) break;
           }
         }
 
-        if (local_max || local_min) {
-          keypoint_ids.emplace_back(global_index);
+        for (int max_i = 0; max_i < max_indices.size(); max_i++)
+          if (max_values[max_i] < maximum)
+            keypoint_ids.erase(max_indices[max_i]);
+
+        for (int min_i = 0; min_i < min_indices.size(); min_i++)
+          if (min_values[min_i] > minimum)
+            keypoint_ids.erase(min_indices[min_i]);
+
+        if (found_any) {
+          DetVoxel* max_voxel = det_layer->getVoxelPtrByGlobalIndex(max_index);
+          DetVoxel* min_voxel = det_layer->getVoxelPtrByGlobalIndex(min_index);
+          max_voxel->maximum = true;
+          min_voxel->minimum = true;
+          keypoint_ids.emplace(max_index);
+          keypoint_ids.emplace(min_index);
         }
       }
     }
@@ -324,10 +358,11 @@ class FreetureExtractor {
   template <class InVoxelT, class OutVoxelT>
   using PostProcFunc = std::function<void(OutVoxelT*, GlobalIndex index)>;
 
-  template <typename InVoxelT, typename OutVoxelT, typename KernelT>
+  template <typename InVoxelT, typename OutVoxelT, typename KernelT,
+            typename GlobalIndicesT>
   void convolveVoxel(const Layer<InVoxelT>& in_layer,
                      Layer<OutVoxelT>* out_layer,
-                     const GlobalIndexVector& global_indices, KernelT kernel,
+                     const GlobalIndicesT& global_indices, KernelT kernel,
                      GlobalIndexVector offsets,
                      ConvFunc<InVoxelT, OutVoxelT> conv_func,
                      PostProcFunc<InVoxelT, OutVoxelT> post_func =
