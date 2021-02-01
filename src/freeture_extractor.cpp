@@ -105,7 +105,6 @@ void FreetureExtractor::convolveVoxel(
     if (!ignore_invalid && !out_voxel->valid) continue;
 
     setToZero(&out_voxel->value);
-    CHECK_EQ(kernel.cols() % 2, 1);
     CHECK_EQ(kernel.cols(), offsets.size());
     for (unsigned int idx = 0; idx < offsets.size(); ++idx) {
       const GlobalIndex& neighbor_index = global_index + offsets[idx];

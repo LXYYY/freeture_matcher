@@ -1,7 +1,9 @@
 layer_with_traj: true
 extractor:
+  verbose: true
   radius_feature: 15
   n_div: 10
+  radius_local_extremum: 15
 
 matcher:
   verbose: false

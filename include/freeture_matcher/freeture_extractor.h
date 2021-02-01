@@ -17,14 +17,31 @@ namespace voxblox {
 class FreetureExtractor {
  public:
   struct Config : EsdfIntegrator::Config {
-    int radius_feature;
-    int n_div;
+    bool verbose = false;
+    int radius_feature = 15;
+    int n_div = 10;
+    int radius_local_extremum = 15;
   };
+
+  friend inline std::ostream& operator<<(std::ostream& s, const Config& v) {
+    s << std::endl
+      << "FreetureExtractor using Config:" << std::endl
+      << "  verbose:" << v.verbose << std::endl
+      << "  radius_feature" << v.radius_feature << std::endl
+      << "  n_div" << v.n_div << std::endl
+      << "  radius_local_extremum" << v.radius_local_extremum << std::endl
+      << "-------------------------------------------" << std::endl;
+    return (s);
+  }
+
   Config getConfigFromRosParam(const ros::NodeHandle& nh_private) {
     Config config;
+    nh_private.param("verbose", config.verbose, config.verbose);
     nh_private.param("radius_feature", config.radius_feature,
                      config.radius_feature);
     nh_private.param("n_div", config.n_div, config.n_div);
+    nh_private.param("radius_local_extremum", config.radius_local_extremum,
+                     config.radius_local_extremum);
     return config;
   }
 
@@ -33,20 +50,19 @@ class FreetureExtractor {
   typedef Eigen::Matrix<float, 1, Eigen::Dynamic> KernelX;
 
   explicit FreetureExtractor(const ros::NodeHandle& nh_private)
-      : FreetureExtractor(getConfigFromRosParam(nh_private)) {
-    LOG(INFO) << nh_private.getNamespace();
-  }
+      : FreetureExtractor(getConfigFromRosParam(nh_private)) {}
 
   explicit FreetureExtractor(const Config& config) : config_(config) {
+    LOG(INFO) << config_;
     float sigma2 =
         static_cast<float>(config_.radius_feature * config_.radius_feature);
 
     CHECK_EQ(config_.radius_feature % 2, 1);
-    int mid = static_cast<int>(config_.radius_feature / 2);
+    int r_f = config_.radius_feature;
     std::vector<int> gauss;
-    for (int i = -mid; i <= mid; i++)
-      for (int j = -(mid - abs(i)); j <= (mid - abs(i)); j++)
-        for (int k = -(mid - abs(i) - abs(j)); k < (mid - abs(i) - abs(j));
+    for (int i = -r_f; i <= r_f; i++)
+      for (int j = -(r_f - abs(i)); j <= (r_f - abs(i)); j++)
+        for (int k = -(r_f - abs(i) - abs(j)); k < (r_f - abs(i) - abs(j));
              k++) {
           kFeatureOffset.emplace_back(i, j, k);
           int distance = abs(i) + abs(j) + abs(k);
@@ -61,7 +77,8 @@ class FreetureExtractor {
 
     // TODO(mikexyl): verify
     kSolidAngle.resize(2 * config_.n_div * config_.n_div + 2);
-    for (int i = 0; i < kSolidAngle.size(); i++) {
+    kSolidAngle.setZero();
+    for (int i = 0; i < kSolidAngle.size() - 2; i++) {
       int azi_id;
       int pol_id = std::remquo(i, config_.n_div, &azi_id);
       float azi = azi_id * kAngleDivision - M_PI;
@@ -72,6 +89,14 @@ class FreetureExtractor {
     CHECK_EQ(kSolidAngle[kSolidAngle.size() - 2], 0.0);
     kSolidAngle[kSolidAngle.size() - 1] = 1.0;
     kSolidAngle[kSolidAngle.size() - 2] = 1.0;
+
+    int r_local = config_.radius_feature;
+    for (int i = -r_local; i <= r_local; i++)
+      for (int j = -(r_local - abs(i)); j <= (r_local - abs(i)); j++)
+        for (int k = -(r_local - abs(i) - abs(j));
+             k < (r_local - abs(i) - abs(j)); k++) {
+          kLocalMaxOffset.emplace_back(i, j, k);
+        }
   }
 
   static float gaussian(float distance, float sigma2) {
@@ -155,7 +180,6 @@ class FreetureExtractor {
       if (!det_block) continue;
 
       sk_layer.allocateBlockPtrByIndex(block_index);
-
       const size_t num_voxels_per_block = det_block->num_voxels();
       for (size_t lin_index = 0u; lin_index < num_voxels_per_block;
            lin_index++) {
@@ -169,30 +193,34 @@ class FreetureExtractor {
         GlobalIndex global_index = getGlobalVoxelIndexFromBlockAndVoxelIndex(
             block_index, voxel_index, det_layer.voxels_per_side());
 
-        Neighborhood<Connectivity::kTwentySix>::IndexMatrix index_matrix;
-        Neighborhood<Connectivity::kTwentySix>::getFromGlobalIndex(
-            global_index, &index_matrix);
-
         HessianMatrix h;
-        bool local_max = true;
-        for (unsigned int idx = 0; idx < 26; ++idx) {
+        bool local_max = true, local_min = true;
+        for (unsigned int idx = 0; idx < kLocalMaxOffset.size(); ++idx) {
           const GlobalIndex& neighbor_index =
-              global_index + index_matrix.col(idx);
+              global_index + kLocalMaxOffset[idx];
 
           const DetVoxel* neighbor_voxel =
               det_layer.getVoxelPtrByGlobalIndex(neighbor_index);
+          if (!neighbor_voxel) continue;
           if (neighbor_voxel->valid) {
             if (neighbor_voxel->value > det_voxel.value) {
               local_max = false;
-              break;
             }
+            if (neighbor_voxel->value < det_voxel.value) {
+              local_min = false;
+            }
+            if (!local_min && !local_max) break;
           }
         }
-        if (local_max) {
+
+        if (local_max || local_min) {
           keypoint_ids.emplace_back(global_index);
         }
       }
     }
+
+    LOG_IF(INFO, config_.verbose)
+        << "detected keypoints " << keypoint_ids.size();
 
     convolveVoxel<GradVoxel, SkVoxel, KernelX>(
         grad_layer, &sk_layer, keypoint_ids, kFeatureGaussianKernel,
@@ -202,6 +230,8 @@ class FreetureExtractor {
         std::bind(&FreetureExtractor::postEigen, this, std::placeholders::_1,
                   std::placeholders::_2);
 
+    LOG_IF(INFO, config_.verbose) << "finished compute first 2*n^2 descriptor";
+
     convolveVoxel<TsdfVoxel, SkVoxel, KernelX>(
         tsdf_layer, &sk_layer, keypoint_ids, kFeatureGaussianKernel,
         kFeatureOffset,
@@ -210,6 +240,9 @@ class FreetureExtractor {
                   std::placeholders::_3)),
         std::bind(&FreetureExtractor::postAugDescriptor, this,
                   std::placeholders::_1, std::placeholders::_2);
+
+    LOG_IF(INFO, config_.verbose)
+        << "finished compute dist and class descriptor";
   }
 
   template <typename VoxelT>
@@ -429,6 +462,8 @@ class FreetureExtractor {
   GlobalIndexVector kFeatureOffset;
   float kAngleDivision;
   Eigen::VectorXd kSolidAngle;
+
+  GlobalIndexVector kLocalMaxOffset;
 
   static const Kernel3 kGaussKernel;
   static const Kernel3 kSobelKernel;
