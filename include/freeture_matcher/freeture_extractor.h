@@ -1,8 +1,8 @@
 #ifndef INCLUDE_FREETURE_MATCHER_FREETURE_EXTRACTOR_H_
 #define INCLUDE_FREETURE_MATCHER_FREETURE_EXTRACTOR_H_
 
-#include <open3d/geometry/PointCloud.h>
-#include <open3d/pipelines/registration/Feature.h>
+#include <Open3D/Geometry/PointCloud.h>
+#include <Open3D/Registration/Feature.h>
 #include <ros/ros.h>
 #include <voxblox/integrator/esdf_integrator.h>
 #include <voxblox_ros/ros_params.h>

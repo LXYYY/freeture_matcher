@@ -1,9 +1,9 @@
 #ifndef INCLUDE_FREETURE_MATCHER_COMMON_H_
 #define INCLUDE_FREETURE_MATCHER_COMMON_H_
 
-#include <open3d/geometry/PointCloud.h>
-#include <open3d/pipelines/registration/Feature.h>
-#include <open3d/pipelines/registration/Registration.h>
+#include <Open3D/Geometry/PointCloud.h>
+#include <Open3D/Registration/Feature.h>
+#include <Open3D/Registration/Registration.h>
 #include <voxblox/core/common.h>
 #include <voxblox/core/voxel.h>
 
@@ -55,10 +55,10 @@ inline void setToZero<Eigen::Matrix3f>(Eigen::Matrix3f* in) {
 typedef Eigen::Vector3d PointV;
 typedef std::vector<Eigen::Vector3d> PointcloudV;
 typedef open3d::geometry::PointCloud O3dPointCloud;
-typedef open3d::pipelines::registration::Feature O3dFeature;
+typedef open3d::registration::Feature O3dFeature;
 using Feature = Eigen::VectorXd;
 using FeatureMatrix = AlignedVector<Eigen::VectorXd>;
-using RegistrationResult = open3d::pipelines::registration::RegistrationResult;
+using RegistrationResult = open3d::registration::RegistrationResult;
 }  // namespace voxblox
 
 #endif  // INCLUDE_FREETURE_MATCHER_COMMON_H_

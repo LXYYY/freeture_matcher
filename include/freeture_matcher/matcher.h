@@ -1,7 +1,7 @@
 #ifndef INCLUDE_FREETURE_MATCHER_MATCHER_H_
 #define INCLUDE_FREETURE_MATCHER_MATCHER_H_
 
-#include <open3d/pipelines/registration/Registration.h>
+#include <Open3D/Registration/Registration.h>
 #include <ros/ros.h>
 
 #include <vector>
@@ -70,26 +70,24 @@ class Matcher {
     o3d_feature_t.data_ = (feature_matrix_t);
 
     std::vector<std::reference_wrapper<
-        const open3d::pipelines::registration::CorrespondenceChecker>>
+        const open3d::registration::CorrespondenceChecker>>
         checkers;
     auto checker_edge_length =
-        open3d::pipelines::registration::CorrespondenceCheckerBasedOnEdgeLength(
+        open3d::registration::CorrespondenceCheckerBasedOnEdgeLength(
             config_.k_dist);
     auto checker_distance =
-        open3d::pipelines::registration::CorrespondenceCheckerBasedOnDistance(
+        open3d::registration::CorrespondenceCheckerBasedOnDistance(
             config_.max_corr_distance);
     checkers.push_back(checker_edge_length);
     checkers.push_back(checker_distance);
 
-    *result = open3d::pipelines::registration::
-        RegistrationRANSACBasedOnFeatureMatching(
-            point_cloud_q, point_cloud_t, o3d_feature_q, o3d_feature_t, false,
-            config_.max_corr_distance,
-            open3d::pipelines::registration::
-                TransformationEstimationPointToPoint(false),
-            3, checkers,
-            open3d::pipelines::registration::RANSACConvergenceCriteria(
-                config_.n_max_ransac, config_.max_ransac_valid));
+    *result = open3d::registration::RegistrationRANSACBasedOnFeatureMatching(
+        point_cloud_q, point_cloud_t, o3d_feature_q, o3d_feature_t,
+        config_.max_corr_distance,
+        open3d::registration::TransformationEstimationPointToPoint(false), 3,
+        checkers,
+        open3d::registration::RANSACConvergenceCriteria(
+            config_.n_max_ransac, config_.max_ransac_valid));
     LOG(INFO) << "registration result: fitness: " << result->fitness_
               << ", inliner_rmse: " << result->inlier_rmse_;
 
