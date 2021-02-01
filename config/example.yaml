@@ -1,0 +1,11 @@
+layer_with_traj: true
+extractor:
+  radius_feature: 15
+  n_div: 10
+
+matcher:
+  verbose: false
+  max_corr_distance: 1.5
+  k_dist: 0.9
+  n_max_ransac: 10000
+  max_ransac_valid: 0.9

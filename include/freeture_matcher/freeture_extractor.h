@@ -3,7 +3,9 @@
 
 #include <open3d/geometry/PointCloud.h>
 #include <open3d/pipelines/registration/Feature.h>
+#include <ros/ros.h>
 #include <voxblox/integrator/esdf_integrator.h>
+#include <voxblox_ros/ros_params.h>
 
 #include <math.h>
 #include <functional>
@@ -12,21 +14,30 @@
 #include "freeture_matcher/common.h"
 
 namespace voxblox {
-class FreetureExtractor : public EsdfIntegrator {
+class FreetureExtractor {
  public:
   struct Config : EsdfIntegrator::Config {
     int radius_feature;
     int n_div;
   };
+  Config getConfigFromRosParam(const ros::NodeHandle& nh_private) {
+    Config config;
+    nh_private.param("radius_feature", config.radius_feature,
+                     config.radius_feature);
+    nh_private.param("n_div", config.n_div, config.n_div);
+    return config;
+  }
+
   typedef Eigen::Matrix<float, 1, 3> Kernel3;
   typedef Eigen::Matrix3f HessianMatrix;
   typedef Eigen::Matrix<float, 1, Eigen::Dynamic> KernelX;
 
-  FreetureExtractor(const Config& config, Layer<TsdfVoxel>* tsdf_layer,
-                    Layer<EsdfVoxel>* esdf_layer)
-      : EsdfIntegrator(static_cast<EsdfIntegrator::Config>(config), tsdf_layer,
-                       esdf_layer),
-        config_(config) {
+  explicit FreetureExtractor(const ros::NodeHandle& nh_private)
+      : FreetureExtractor(getConfigFromRosParam(nh_private)) {
+    LOG(INFO) << nh_private.getNamespace();
+  }
+
+  explicit FreetureExtractor(const Config& config) : config_(config) {
     float sigma2 =
         static_cast<float>(config_.radius_feature * config_.radius_feature);
 
@@ -69,39 +80,38 @@ class FreetureExtractor : public EsdfIntegrator {
 
   virtual ~FreetureExtractor() = default;
 
-  void updateGradientFromTsdfLayerBatch(const Layer<TsdfVoxel>& tsdf_layer,
-                                        Layer<GradVoxel>* grad_layer);
-  void updateGradientFromNeighbors(const Layer<TsdfVoxel>& tsdf_layer,
-                                   Layer<GradVoxel>* grad_layer);
+  void extractFreetures(const Layer<TsdfVoxel>& tsdf_layer);
+
   void computeGaussianDistance(const Layer<TsdfVoxel>& tsdf_layer,
                                Layer<DistVoxel>* dist_gauss_layer);
 
-  void computeHessian(const Layer<GradVoxel>& grad_layer,
-                      Layer<DetVoxel>* det_layer) {
+  void computeHessian(const Layer<TsdfVoxel>& tsdf_layer,
+                      const Layer<GradVoxel>& grad_layer) {
+    Layer<DetVoxel> det_layer(tsdf_layer.voxel_size(),
+                              tsdf_layer.voxels_per_side());
     BlockIndexList grad_blocks;
     grad_layer.getAllAllocatedBlocks(&grad_blocks);
     for (auto const& block_index : grad_blocks) {
       auto grad_block = grad_layer.getBlockPtrByIndex(block_index);
       if (!grad_block) continue;
 
-      Block<DetVoxel>::Ptr hessian_block =
-          det_layer->allocateBlockPtrByIndex(block_index);
-      hessian_block->set_updated(true);
+      Block<DetVoxel>::Ptr det_block =
+          det_layer.allocateBlockPtrByIndex(block_index);
+      det_block->set_updated(true);
       const size_t num_voxels_per_block = grad_block->num_voxels();
       for (size_t lin_index = 0u; lin_index < num_voxels_per_block;
            lin_index++) {
-        DetVoxel& hessian_voxel =
-            hessian_block->getVoxelByLinearIndex(lin_index);
+        DetVoxel& det_voxel = det_block->getVoxelByLinearIndex(lin_index);
         auto const& grad_voxel = grad_block->getVoxelByLinearIndex(lin_index);
         if (!grad_voxel.valid) {
-          hessian_voxel.valid = false;
+          det_voxel.valid = false;
           continue;
         }
 
         VoxelIndex voxel_index =
             grad_block->computeVoxelIndexFromLinearIndex(lin_index);
         GlobalIndex global_index = getGlobalVoxelIndexFromBlockAndVoxelIndex(
-            block_index, voxel_index, voxels_per_side_);
+            block_index, voxel_index, tsdf_layer.voxels_per_side());
 
         Neighborhood<Connectivity::kSix>::IndexMatrix index_matrix;
         Neighborhood<Connectivity::kSix>::getFromGlobalIndex(global_index,
@@ -115,7 +125,7 @@ class FreetureExtractor : public EsdfIntegrator {
           const GradVoxel* neighbor_voxel =
               grad_layer.getVoxelPtrByGlobalIndex(neighbor_index);
           if (!neighbor_voxel) {
-            hessian_voxel.valid = false;
+            det_voxel.valid = false;
             break;
           } else {
             int dim = idx / 2, dir = idx % 2;
@@ -125,13 +135,16 @@ class FreetureExtractor : public EsdfIntegrator {
           }
         }
         // compute determinant
-        if (hessian_voxel.valid) hessian_voxel.value = h.determinant();
+        if (det_voxel.valid) det_voxel.value = h.determinant();
       }
     }
+
+    detectKeypointsAndComputeDescriptors(det_layer, grad_layer, tsdf_layer);
   }
 
-  void findDetLocalMax(const Layer<DetVoxel>& det_layer,
-                       const Layer<GradVoxel>& grad_layer, int radius_feature) {
+  void detectKeypointsAndComputeDescriptors(
+      const Layer<DetVoxel>& det_layer, const Layer<GradVoxel>& grad_layer,
+      const Layer<TsdfVoxel>& tsdf_layer) {
     Layer<SkVoxel> sk_layer(det_layer.voxel_size(),
                             det_layer.voxels_per_side());
     GlobalIndexVector keypoint_ids;
@@ -154,7 +167,7 @@ class FreetureExtractor : public EsdfIntegrator {
         VoxelIndex voxel_index =
             det_block->computeVoxelIndexFromLinearIndex(lin_index);
         GlobalIndex global_index = getGlobalVoxelIndexFromBlockAndVoxelIndex(
-            block_index, voxel_index, voxels_per_side_);
+            block_index, voxel_index, det_layer.voxels_per_side());
 
         Neighborhood<Connectivity::kTwentySix>::IndexMatrix index_matrix;
         Neighborhood<Connectivity::kTwentySix>::getFromGlobalIndex(
@@ -180,41 +193,23 @@ class FreetureExtractor : public EsdfIntegrator {
         }
       }
     }
-  }
 
-  void computeLrf(const Layer<GradVoxel>& grad_layer,
-                  const GlobalIndexVector& keypoint_ids,
-                  Layer<SkVoxel>* sk_layer) {
     convolveVoxel<GradVoxel, SkVoxel, KernelX>(
-        grad_layer, sk_layer, keypoint_ids, kFeatureGaussianKernel,
+        grad_layer, &sk_layer, keypoint_ids, kFeatureGaussianKernel,
         kFeatureOffset,
         std::bind(&FreetureExtractor::convSk, this, std::placeholders::_1,
                   std::placeholders::_2, std::placeholders::_3)),
         std::bind(&FreetureExtractor::postEigen, this, std::placeholders::_1,
                   std::placeholders::_2);
 
-    BlockIndexList sk_blocks;
-    sk_layer->getAllAllocatedBlocks(&sk_blocks);
-    for (auto const& sk_block_index : sk_blocks) {
-      auto sk_block = sk_layer->getBlockPtrByIndex(sk_block_index);
-      if (!sk_block) continue;
-
-      const size_t num_voxels_per_block = sk_block->num_voxels();
-      for (size_t lin_index = 0u; lin_index < num_voxels_per_block;
-           lin_index++) {
-        VoxelIndex voxel_index =
-            sk_block->computeVoxelIndexFromLinearIndex(lin_index);
-        GlobalIndex global_index = getGlobalVoxelIndexFromBlockAndVoxelIndex(
-            sk_block_index, voxel_index, voxels_per_side_);
-        for (unsigned int idx = 0; idx < kFeatureGaussianKernel.size(); idx++) {
-          const GlobalIndex& neighbor_index =
-              global_index + kFeatureOffset[idx];
-
-          auto neighbor_voxel =
-              grad_layer.getVoxelPtrByGlobalIndex(neighbor_index);
-        }
-      }
-    }
+    convolveVoxel<TsdfVoxel, SkVoxel, KernelX>(
+        tsdf_layer, &sk_layer, keypoint_ids, kFeatureGaussianKernel,
+        kFeatureOffset,
+        std::bind(&FreetureExtractor::convAugDescriptor, this,
+                  std::placeholders::_1, std::placeholders::_2,
+                  std::placeholders::_3)),
+        std::bind(&FreetureExtractor::postAugDescriptor, this,
+                  std::placeholders::_1, std::placeholders::_2);
   }
 
   template <typename VoxelT>
@@ -258,7 +253,7 @@ class FreetureExtractor : public EsdfIntegrator {
         VoxelIndex voxel_index =
             in_block->computeVoxelIndexFromLinearIndex(lin_index);
         GlobalIndex global_index = getGlobalVoxelIndexFromBlockAndVoxelIndex(
-            block_index, voxel_index, voxels_per_side_);
+            block_index, voxel_index, in_layer.voxels_per_side());
 
         Neighborhood<Connectivity::kSix>::IndexMatrix index_matrix;
         Neighborhood<Connectivity::kSix>::getFromGlobalIndex(global_index,
@@ -376,7 +371,7 @@ class FreetureExtractor : public EsdfIntegrator {
         lrfs.emplace_back(lrf);
       }
 
-    Eigen::VectorXf descriptor(2 * config_.n_div * config_.n_div + 2);
+    Feature descriptor(2 * config_.n_div * config_.n_div + 2);
     for (auto const& lrf : lrfs) {
       // TODO(mikexyl): verify
       auto const& R_f_s = lrf.inverse();
@@ -401,13 +396,13 @@ class FreetureExtractor : public EsdfIntegrator {
     descriptor[descriptor.size() - 1] =
         (eigen_values.array() > 0).sum() * kAlphaClass;
 
-    keypoints_.emplace_back(global_index);
+    keypoints_.emplace_back(global_index.cast<double>());
     in->descriptor_id = features_.size();
     features_.emplace_back(descriptor);
   }
 
   void descSoftBinning(int azi_id, float azi_rem, int pol_id, float pol_rem,
-                       float mag, Eigen::VectorXf* descriptor) {
+                       float mag, Feature* descriptor) {
     auto const& n_div = config_.n_div;
     (*descriptor)[azi_id * n_div + pol_id] +=
         mag * (kAngleDivision - azi_rem) / kAngleDivision *
@@ -422,7 +417,10 @@ class FreetureExtractor : public EsdfIntegrator {
         mag * azi_rem / kAngleDivision * pol_rem / kAngleDivision;
   }
 
-  Pointcloud keypoints_;
+  auto const& getKeypoints() const { return keypoints_; }
+  auto const& getFeatures() const { return features_; }
+
+  PointcloudV keypoints_;
   FeatureMatrix features_;
 
   Config config_;
@@ -430,7 +428,7 @@ class FreetureExtractor : public EsdfIntegrator {
   KernelX kFeatureGaussianKernel;
   GlobalIndexVector kFeatureOffset;
   float kAngleDivision;
-  Eigen::VectorXf kSolidAngle;
+  Eigen::VectorXd kSolidAngle;
 
   static const Kernel3 kGaussKernel;
   static const Kernel3 kSobelKernel;

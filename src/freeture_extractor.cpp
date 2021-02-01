@@ -2,36 +2,15 @@
 
 namespace voxblox {
 
-void FreetureExtractor::updateGradientFromTsdfLayerBatch(
-    const Layer<TsdfVoxel>& tsdf_layer, Layer<GradVoxel>* grad_layer) {
-  BlockIndexList tsdf_blocks;
-  tsdf_layer.getAllAllocatedBlocks(&tsdf_blocks);
-  for (auto const& block_index : tsdf_blocks) {
-    auto tsdf_block = tsdf_layer.getBlockPtrByIndex(block_index);
-    if (!tsdf_block) continue;
-
-    Block<GradVoxel>::Ptr grad_block =
-        grad_layer->allocateBlockPtrByIndex(block_index);
-    grad_block->set_updated(true);
-    const size_t num_voxels_per_block = tsdf_block->num_voxels();
-    for (size_t lin_index = 0u; lin_index < num_voxels_per_block; lin_index++) {
-      const TsdfVoxel& tsdf_voxel =
-          tsdf_block->getVoxelByLinearIndex(lin_index);
-      if (tsdf_voxel.weight < config_.min_weight) continue;
-
-      VoxelIndex voxel_index =
-          tsdf_block->computeVoxelIndexFromLinearIndex(lin_index);
-      GlobalIndex global_index = getGlobalVoxelIndexFromBlockAndVoxelIndex(
-          block_index, voxel_index, voxels_per_side_);
-    }
-  }
-}
-
-void FreetureExtractor::updateGradientFromNeighbors(
-    const Layer<TsdfVoxel>& tsdf_layer, Layer<GradVoxel>* grad_layer) {
+void FreetureExtractor::extractFreetures(const Layer<TsdfVoxel>& tsdf_layer) {
   Layer<DistVoxel> dist_gauss_layer(tsdf_layer.voxel_size(),
                                     tsdf_layer.voxels_per_side());
   computeGaussianDistance(tsdf_layer, &dist_gauss_layer);
+
+  Layer<GradVoxel> grad_layer(tsdf_layer.voxel_size(),
+                              tsdf_layer.voxels_per_side());
+  computeGradient(dist_gauss_layer, &grad_layer);
+  computeHessian(tsdf_layer, grad_layer);
 }
 
 void FreetureExtractor::computeGaussianDistance(
@@ -64,7 +43,7 @@ void FreetureExtractor::convolveLayer(const Layer<DistVoxel>& in_layer,
       VoxelIndex voxel_index =
           tsdf_block->computeVoxelIndexFromLinearIndex(lin_index);
       GlobalIndex global_index = getGlobalVoxelIndexFromBlockAndVoxelIndex(
-          block_index, voxel_index, voxels_per_side_);
+          block_index, voxel_index, in_layer.voxels_per_side());
 
       global_indices.emplace_back(global_index);
     }
@@ -104,7 +83,7 @@ void FreetureExtractor::convolveLayerTsdf(const Layer<TsdfVoxel>& in_layer,
       VoxelIndex voxel_index =
           tsdf_block->computeVoxelIndexFromLinearIndex(lin_index);
       GlobalIndex global_index = getGlobalVoxelIndexFromBlockAndVoxelIndex(
-          block_index, voxel_index, voxels_per_side_);
+          block_index, voxel_index, in_layer.voxels_per_side());
       global_indices.emplace_back(global_index);
     }
   }

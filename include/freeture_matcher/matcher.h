@@ -44,13 +44,15 @@ class Matcher {
     return config;
   }
 
-  Matcher() {}
+  explicit Matcher(const ros::NodeHandle& nh_private)
+      : config_(getConfigFromRosParam(nh_private)) {}
   virtual ~Matcher() = default;
 
-  bool matchPointClouds(
-      const PointcloudV& point_cloud_q, const FeatureMatrix& features_q,
-      const PointcloudV& point_cloud_t, const FeatureMatrix& features_t,
-      open3d::pipelines::registration::RegistrationResult* result) {
+  bool matchPointClouds(const PointcloudV& point_cloud_q,
+                        const FeatureMatrix& features_q,
+                        const PointcloudV& point_cloud_t,
+                        const FeatureMatrix& features_t,
+                        RegistrationResult* result) {
     if (features_q.empty() || features_t.empty()) return false;
     int n = features_q.size(), dim = features_q[0].size();
     Eigen::MatrixXd feature_matrix_q(dim, n);
@@ -70,12 +72,14 @@ class Matcher {
     std::vector<std::reference_wrapper<
         const open3d::pipelines::registration::CorrespondenceChecker>>
         checkers;
-    checkers.emplace_back(
+    auto checker_edge_length =
         open3d::pipelines::registration::CorrespondenceCheckerBasedOnEdgeLength(
-            config_.k_dist));
-    checkers.emplace_back(
+            config_.k_dist);
+    auto checker_distance =
         open3d::pipelines::registration::CorrespondenceCheckerBasedOnDistance(
-            config_.max_corr_distance));
+            config_.max_corr_distance);
+    checkers.push_back(checker_edge_length);
+    checkers.push_back(checker_distance);
 
     *result = open3d::pipelines::registration::
         RegistrationRANSACBasedOnFeatureMatching(
