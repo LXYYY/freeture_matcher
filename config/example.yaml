@@ -1,10 +1,10 @@
 layer_with_traj: true
+o3d_visualize: true
 extractor:
   verbose: true
   radius_feature: 15
   n_div: 10
-  radius_local_extremum: 15
-
+  radius_local_extremum: 5
 matcher:
   verbose: false
   max_corr_distance: 1.5

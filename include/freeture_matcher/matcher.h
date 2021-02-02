@@ -48,27 +48,22 @@ class Matcher {
       : config_(getConfigFromRosParam(nh_private)) {}
   virtual ~Matcher() = default;
 
-  bool matchPointClouds(const PointcloudV& point_cloud_q,
-                        const FeatureMatrix& features_q,
-                        const PointcloudV& point_cloud_t,
-                        const FeatureMatrix& features_t,
-                        RegistrationResult* result) {
-    if (features_q.empty() || features_t.empty()) return false;
-    int n = features_q.size(), dim = features_q[0].size();
+  bool featureMatrixToO3dFeature(const FeatureMatrix& features,
+                                 O3dFeature* o3d_features) {
+    if (features.empty()) return false;
+    int n = features.size(), dim = features[0].size();
     Eigen::MatrixXd feature_matrix_q(dim, n);
-    for (int i = 0; i < features_q.size(); i++)
-      feature_matrix_q.col(i) = features_q[i];
-    O3dFeature o3d_feature_q;
-    o3d_feature_q.data_ = feature_matrix_q;
+    for (int i = 0; i < features.size(); i++)
+      feature_matrix_q.col(i) = features[i];
+    o3d_features->data_ = feature_matrix_q;
+    return true;
+  }
 
-    n = features_t.size();
-    dim = features_t[0].size();
-    Eigen::MatrixXd feature_matrix_t(dim, n);
-    for (int i = 0; i < features_t.size(); i++)
-      feature_matrix_t.col(i) = features_t[i];
-    O3dFeature o3d_feature_t;
-    o3d_feature_t.data_ = (feature_matrix_t);
-
+  bool matchPointClouds(const PointcloudV& point_cloud_q,
+                        const O3dFeature& features_q,
+                        const PointcloudV& point_cloud_t,
+                        const O3dFeature& features_t,
+                        RegistrationResult* result) {
     std::vector<std::reference_wrapper<
         const open3d::registration::CorrespondenceChecker>>
         checkers;
@@ -82,7 +77,7 @@ class Matcher {
     checkers.push_back(checker_distance);
 
     *result = open3d::registration::RegistrationRANSACBasedOnFeatureMatching(
-        point_cloud_q, point_cloud_t, o3d_feature_q, o3d_feature_t,
+        point_cloud_q, point_cloud_t, features_q, features_t,
         config_.max_corr_distance,
         open3d::registration::TransformationEstimationPointToPoint(false), 3,
         checkers,

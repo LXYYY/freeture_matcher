@@ -18,4 +18,5 @@
         <depend>voxblox_ros</depend>
         <depend>voxblox_msgs</depend>
         <depend>coxgraph_msgs</depend>
+        <depend>visualization_msgs</depend>
 </package>

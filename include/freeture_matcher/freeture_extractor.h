@@ -60,7 +60,7 @@ class FreetureExtractor {
 
     CHECK_EQ(config_.radius_feature % 2, 1);
     int r_f = config_.radius_feature;
-    std::vector<int> gauss;
+    std::vector<float> gauss;
     for (int i = -r_f; i <= r_f; i++)
       for (int j = -(r_f - abs(i)); j <= (r_f - abs(i)); j++)
         for (int k = -(r_f - abs(i) - abs(j)); k < (r_f - abs(i) - abs(j));
@@ -70,8 +70,11 @@ class FreetureExtractor {
           gauss.emplace_back(gaussian(distance, sigma2));
         }
     kFeatureGaussianKernel.resize(gauss.size());
-    for (size_t i = 0; i < gauss.size(); i++)
+    for (size_t i = 0; i < gauss.size(); i++) {
       kFeatureGaussianKernel(i) = gauss[i];
+      CHECK_EQ(kFeatureGaussianKernel(i), kFeatureGaussianKernel(i));
+    }
+    CHECK_NE(kFeatureGaussianKernel.sum(), 0);
     kFeatureGaussianKernel /= kFeatureGaussianKernel.sum();
 
     kAngleDivision = M_PI / config_.n_div;
@@ -91,7 +94,7 @@ class FreetureExtractor {
     kSolidAngle[kSolidAngle.size() - 1] = 1.0;
     kSolidAngle[kSolidAngle.size() - 2] = 1.0;
 
-    int r_local = config_.radius_feature;
+    int r_local = config_.radius_local_extremum;
     for (int i = -r_local; i <= r_local; i++)
       for (int j = -(r_local - abs(i)); j <= (r_local - abs(i)); j++)
         for (int k = -(r_local - abs(i) - abs(j));
@@ -129,6 +132,7 @@ class FreetureExtractor {
            lin_index++) {
         DetVoxel& det_voxel = det_block->getVoxelByLinearIndex(lin_index);
         auto const& grad_voxel = grad_block->getVoxelByLinearIndex(lin_index);
+        det_voxel.valid = grad_voxel.valid;
         if (!grad_voxel.valid) {
           det_voxel.valid = false;
           continue;
@@ -144,24 +148,29 @@ class FreetureExtractor {
                                                              &index_matrix);
 
         HessianMatrix h;
+        h.setZero();
         for (unsigned int idx = 0; idx < 6; ++idx) {
           const GlobalIndex& neighbor_index =
               global_index + index_matrix.col(idx);
 
           const GradVoxel* neighbor_voxel =
               grad_layer.getVoxelPtrByGlobalIndex(neighbor_index);
-          if (!neighbor_voxel) {
+          if (!neighbor_voxel || !neighbor_voxel->valid) {
             det_voxel.valid = false;
             break;
           } else {
             int dim = idx / 2, dir = idx % 2;
             for (int i = 0; i < 3; i++) {
-              h(dim, i) = neighbor_voxel->value(i) * kSobelKernel(dir * 2);
+              h(dim, i) += neighbor_voxel->value(i) * kSobelKernel(dir * 2);
+              CHECK_EQ(neighbor_voxel->value(i), neighbor_voxel->value(i));
             }
           }
         }
         // compute determinant
-        if (det_voxel.valid) det_voxel.value = h.determinant();
+        if (det_voxel.valid) {
+          det_voxel.value = h.determinant();
+          CHECK_EQ(det_voxel.value, det_voxel.value) << h;
+        }
       }
     }
 
@@ -195,7 +204,8 @@ class FreetureExtractor {
             block_index, voxel_index, det_layer->voxels_per_side());
 
         HessianMatrix h;
-        DetVoxel::ValueT maximum = std::numeric_limits<DetVoxel::ValueT>::min(),
+        DetVoxel::ValueT maximum =
+                             std::numeric_limits<DetVoxel::ValueT>::lowest(),
                          minimum = std::numeric_limits<DetVoxel::ValueT>::max();
         GlobalIndex max_index, min_index;
         GlobalIndexVector max_indices, min_indices;
@@ -220,7 +230,7 @@ class FreetureExtractor {
           if (neighbor_voxel->valid) {
             neighbor_voxel->valid = false;
             CHECK_GT(neighbor_voxel->value,
-                     std::numeric_limits<DetVoxel::ValueT>::min());
+                     std::numeric_limits<DetVoxel::ValueT>::lowest());
             if (neighbor_voxel->value > maximum) {
               maximum = neighbor_voxel->value;
               max_index = neighbor_index;
@@ -260,9 +270,9 @@ class FreetureExtractor {
         grad_layer, &sk_layer, keypoint_ids, kFeatureGaussianKernel,
         kFeatureOffset,
         std::bind(&FreetureExtractor::convSk, this, std::placeholders::_1,
-                  std::placeholders::_2, std::placeholders::_3)),
+                  std::placeholders::_2, std::placeholders::_3),
         std::bind(&FreetureExtractor::postEigen, this, std::placeholders::_1,
-                  std::placeholders::_2);
+                  std::placeholders::_2));
 
     LOG_IF(INFO, config_.verbose) << "finished compute first 2*n^2 descriptor";
 
@@ -271,12 +281,12 @@ class FreetureExtractor {
         kFeatureOffset,
         std::bind(&FreetureExtractor::convAugDescriptor, this,
                   std::placeholders::_1, std::placeholders::_2,
-                  std::placeholders::_3)),
+                  std::placeholders::_3),
         std::bind(&FreetureExtractor::postAugDescriptor, this,
-                  std::placeholders::_1, std::placeholders::_2);
+                  std::placeholders::_1, std::placeholders::_2));
 
     LOG_IF(INFO, config_.verbose)
-        << "finished compute dist and class descriptor";
+        << "finished compute dist and class descriptor " << features_.size();
   }
 
   template <typename VoxelT>
@@ -295,32 +305,34 @@ class FreetureExtractor {
     return static_cast<bool>(block);
   }
 
-  void computeGradient(const Layer<DistVoxel>& in_layer,
+  void computeGradient(const Layer<DistVoxel>& dist_layer,
                        Layer<GradVoxel>* grad_layer) {
-    BlockIndexList in_blocks;
-    in_layer.getAllAllocatedBlocks(&in_blocks);
-    for (auto const& block_index : in_blocks) {
-      auto in_block = in_layer.getBlockPtrByIndex(block_index);
-      if (!in_block) continue;
+    BlockIndexList dist_blocks;
+    dist_layer.getAllAllocatedBlocks(&dist_blocks);
+    for (auto const& block_index : dist_blocks) {
+      auto dist_block = dist_layer.getBlockPtrByIndex(block_index);
+      if (!dist_block) continue;
 
       Block<GradVoxel>::Ptr grad_block =
           grad_layer->allocateBlockPtrByIndex(block_index);
       grad_block->set_updated(true);
-      const size_t num_voxels_per_block = in_block->num_voxels();
+      const size_t num_voxels_per_block = dist_block->num_voxels();
       for (size_t lin_index = 0u; lin_index < num_voxels_per_block;
            lin_index++) {
         GradVoxel& grad_voxel = grad_block->getVoxelByLinearIndex(lin_index);
 
-        auto const& tsdf_voxel = in_block->getVoxelByLinearIndex(lin_index);
-        if (!tsdf_voxel.valid) {
+        auto const& dist_voxel = dist_block->getVoxelByLinearIndex(lin_index);
+        if (!dist_voxel.valid) {
           grad_voxel.valid = false;
           continue;
         }
 
+        grad_voxel.value.setZero();
+
         VoxelIndex voxel_index =
-            in_block->computeVoxelIndexFromLinearIndex(lin_index);
+            dist_block->computeVoxelIndexFromLinearIndex(lin_index);
         GlobalIndex global_index = getGlobalVoxelIndexFromBlockAndVoxelIndex(
-            block_index, voxel_index, in_layer.voxels_per_side());
+            block_index, voxel_index, dist_layer.voxels_per_side());
 
         Neighborhood<Connectivity::kSix>::IndexMatrix index_matrix;
         Neighborhood<Connectivity::kSix>::getFromGlobalIndex(global_index,
@@ -330,16 +342,19 @@ class FreetureExtractor {
               global_index + index_matrix.col(idx);
 
           const DistVoxel* neighbor_voxel =
-              in_layer.getVoxelPtrByGlobalIndex(neighbor_index);
-          if (!neighbor_voxel) {
+              dist_layer.getVoxelPtrByGlobalIndex(neighbor_index);
+          if (!neighbor_voxel || !neighbor_voxel->valid) {
             grad_voxel.valid = false;
             break;
           } else {
+            CHECK_EQ(neighbor_voxel->value, neighbor_voxel->value);
             int dim = idx / 2, dir = idx % 2;
-            grad_voxel.value(dim) =
+            grad_voxel.value(dim) +=
                 neighbor_voxel->value * kSobelKernel(dir * 2);
           }
         }
+        for (int i = 0; i < 3; i++)
+          CHECK_EQ(grad_voxel.value(i), grad_voxel.value(i));
       }
     }
   }
@@ -370,11 +385,17 @@ class FreetureExtractor {
                      bool ignore_invalid = false);
 
   void convValueAdd(const DistVoxel& in, DistVoxel* out, float kernel_value) {
+    if (!in.valid) {
+      out->valid = false;
+      return;
+    }
+    CHECK_EQ(in.value, in.value);
     out->value += in.value * kernel_value;
   }
 
   void convValueAddTsdf(const TsdfVoxel& in, DistVoxel* out,
                         float kernel_value) {
+    CHECK_EQ(in.distance, in.distance);
     out->value += in.distance * kernel_value;
   }
 
@@ -390,6 +411,7 @@ class FreetureExtractor {
   }
 
   void convSk(const GradVoxel& in, SkVoxel* out, float kernel_value) {
+    if (!in.valid) return;
     SkVoxel::ValueT neighbor_value;
     auto const& weighted_grad = in.value * kernel_value;
     for (int i = 0; i < 3; i++)
@@ -398,9 +420,16 @@ class FreetureExtractor {
       }
     out->value += neighbor_value;
     out->gk.emplace_back(in.value * kernel_value);
+    CHECK_EQ((in.value)[0], (in.value)[0]);
+    CHECK_EQ((in.value)[1], (in.value)[1]);
+    CHECK_EQ((in.value)[2], (in.value)[2]);
+    CHECK_EQ((in.value * kernel_value)[0], (in.value * kernel_value)[0]);
+    CHECK_EQ((in.value * kernel_value)[1], (in.value * kernel_value)[1]);
+    CHECK_EQ((in.value * kernel_value)[2], (in.value * kernel_value)[2]);
   }
 
   void postEigen(SkVoxel* in, GlobalIndex global_index) {
+    if (in->gk.empty()) return;
     // self adjoint eigen solver gives eigen value and vector in
     // ASCENDING order of eigen values
     Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> es(

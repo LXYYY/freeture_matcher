@@ -112,17 +112,20 @@ void FreetureExtractor::convolveVoxel(
 
       const InVoxelT* neighbor_voxel =
           in_layer.getVoxelPtrByGlobalIndex(neighbor_index);
+      // TODO(mikexyl): two kind of invalid, either neighbor_voxel doesn't
+      // exist, or valid is false
       if (!neighbor_voxel) {
         if (!ignore_invalid) {
           out_voxel->valid = false;
           break;
         }
       } else {
+        CHECK_EQ(kernel[idx], kernel[idx]) << kernel.cols() << " " << idx;
         conv_func(*neighbor_voxel, out_voxel, kernel(idx));
       }
     }
 
-    if (post_func) post_func(out_voxel, global_index);
+    if (post_func && out_voxel->valid) post_func(out_voxel, global_index);
   }
 }
 
