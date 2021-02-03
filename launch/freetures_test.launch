@@ -4,7 +4,7 @@
         <arg name="mav_name" default="jay" />
         <arg name="bag_file" default="/home/lxy/Datasets/deutsches_museum/deutsche_museum_s4.bag" />
         <arg name="freeture_config_file" default="$(find freeture_matcher)/config/example.yaml" />
-        <arg name="output_bag_file" default="/workspaces/voxgraph_melodic_ws/eval/esdf_pointcloud2.bag" />
+        <arg name="output_bag_file" default="/workspaces/voxgraph_melodic_ws/eval/dm_55.bag" />
         <arg name="record" default="false" />
         <arg name="debug" default="false" />
 

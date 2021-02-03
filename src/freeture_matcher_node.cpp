@@ -55,9 +55,15 @@ class FreetureNode {
 
   void layerWithTrajCallback(
       const voxblox_msgs::LayerWithTrajectory& layer_msg) {
+    if (layer_msg.trajectory.poses.empty()) {
+      ROS_WARN_STREAM("Received a submap without trajectory");
+    }
+
     kindr::minimal::QuatTransformationTemplate<double> T_G_S_D;
     tf::poseMsgToKindr(
-        layer_msg.trajectory.poses[layer_msg.trajectory.poses.size() / 2].pose,
+        layer_msg.trajectory
+            .poses[static_cast<size_t>(layer_msg.trajectory.poses.size() / 2)]
+            .pose,
         &T_G_S_D);
     submapProcess(layer_msg.layer, T_G_S_D.cast<FloatingPoint>());
   }

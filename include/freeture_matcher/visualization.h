@@ -50,19 +50,16 @@ inline bool o3dMeshFromTsdfLayer(const Layer<TsdfVoxel>& tsdf_layer,
   mesh_layer.getConnectedMesh(&connected_mesh, 0.5 * tsdf_layer.voxel_size());
 
   CHECK_EQ(connected_mesh.indices.size() % 3, 0);
-  CHECK_EQ(connected_mesh.indices.size(), connected_mesh.vertices.size());
 
   std::vector<Eigen::Vector3d> vertices;
   std::vector<Eigen::Vector3i> indices;
   for (int i = 0; i < connected_mesh.indices.size(); i = i + 3) {
-    vertices.emplace_back(connected_mesh.vertices[i].cast<double>());
-    vertices.emplace_back(connected_mesh.vertices[i + 1].cast<double>());
-    vertices.emplace_back(connected_mesh.vertices[i + 2].cast<double>());
-
     indices.emplace_back(connected_mesh.indices[i],
                          connected_mesh.indices[i + 1],
                          connected_mesh.indices[i + 2]);
   }
+  for (auto const& point : connected_mesh.vertices)
+    vertices.emplace_back(point.cast<double>());
   *o3d_mesh = open3d::geometry::TriangleMesh(vertices, indices);
 
   return true;
