@@ -12,4 +12,5 @@ matcher:
   max_ransac_valid: 0.9
   o3d_visualize: false
   voc_file: "/workspaces/voxgraph_melodic_ws/src/freeture_matcher/config/freetures_voc.yml.gz"
-  train_voc: true
+  train_voc: false
+  use_dbow: false

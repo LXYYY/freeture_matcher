@@ -3,6 +3,8 @@
 namespace voxblox {
 
 void FreetureExtractor::extractFreetures(const Layer<TsdfVoxel>& tsdf_layer) {
+  keypoints_.clear();
+  features_.clear();
   Layer<DistVoxel> dist_gauss_layer(tsdf_layer.voxel_size(),
                                     tsdf_layer.voxels_per_side());
   computeGaussianDistance(tsdf_layer, &dist_gauss_layer);

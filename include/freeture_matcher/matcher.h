@@ -33,6 +33,7 @@ class Matcher {
     bool train_voc = false;
     int bow_voc_k = 10;
     int bow_voc_l = 6;
+    bool use_dbow = false;
 
     friend inline std::ostream& operator<<(std::ostream& s, const Config& v) {
       s << std::endl
@@ -47,6 +48,7 @@ class Matcher {
         << "  train_voc: " << v.train_voc << std::endl
         << "  bow_voc_k: " << v.bow_voc_k << std::endl
         << "  bow_voc_l: " << v.bow_voc_l << std::endl
+        << "  use_dbow: " << v.use_dbow << std::endl
         << "-------------------------------------------" << std::endl;
       return (s);
     }
@@ -67,13 +69,14 @@ class Matcher {
     nh_private.param("train_voc", config.train_voc, config.train_voc);
     nh_private.param("bow_voc_k", config.bow_voc_k, config.bow_voc_k);
     nh_private.param("bow_voc_l", config.bow_voc_l, config.bow_voc_l);
+    nh_private.param("use_dbow", config.use_dbow, config.use_dbow);
     return config;
   }
 
   explicit Matcher(const ros::NodeHandle& nh_private)
       : config_(getConfigFromRosParam(nh_private)), nh_(nh_private) {
     LOG(INFO) << config_;
-    if (config_.voc_file.size() > 0 && !config_.train_voc) {
+    if (config_.voc_file.size() > 0 && config_.use_dbow && !config_.train_voc) {
       std::ifstream f_check(config_.voc_file.c_str());
       if (!f_check.good()) {
         LOG(WARNING) << "Feature database configured to enable dbow search, "
