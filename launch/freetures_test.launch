@@ -6,11 +6,11 @@
         <arg name="freeture_config_file" default="$(find freeture_matcher)/config/example.yaml" />
         <arg name="output_bag_file" default="/workspaces/voxgraph_melodic_ws/eval/esdf_pointcloud2.bag" />
         <arg name="record" default="false" />
+        <arg name="debug" default="false" />
 
-        <!--        <node name="map_to_map_0" pkg="tf" type="static_transform_publisher" output="screen" args="0 0 0 0 0 0 1 /map /map_0" />-->
-        <!--  <node name="base_to_horizontal" pkg="tf" type="static_transform_publisher" output="screen" args="0.010 0.000 0.190 0.087 0.000 0.996 -0.000 /base_link /horizontal_vlp16_link" /> -->
-        <!--        <node name="base_to_vertical" pkg="tf" type="static_transform_publisher" output="screen" args="0.190 0.000 0.040 0.000 0.643 0.000 0.766 /base_link /vertical_vlp16_link" />-->
-        <arg name="launch-prefix" value="gdb -ex run --args" />
+        <arg if="$(arg debug)" name="launch-prefix" value="gdb -ex run --args" />
+        <arg unless="$(arg debug)" name="launch-prefix" value="" />
+
         <node name="freeture_matcher_node" pkg="freeture_matcher" type="freeture_matcher_node" output="screen" args="-alsologtostderr" launch-prefix="$(arg launch-prefix)">
                 <remap from="~tsdf_map_in" to="/tsdf_client_0/tsdf_map_out" />
                 <rosparam file="$(arg freeture_config_file)" />
