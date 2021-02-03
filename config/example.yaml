@@ -1,5 +1,4 @@
 layer_with_traj: true
-o3d_visualize: false
 extractor:
   verbose: true
   radius_feature: 15
@@ -11,3 +10,6 @@ matcher:
   k_dist: 0.9
   n_max_ransac: 10000
   max_ransac_valid: 0.9
+  o3d_visualize: false
+  voc_file: "/workspaces/voxgraph_melodic_ws/src/freeture_matcher/config/freetures_voc.yml.gz"
+  train_voc: true

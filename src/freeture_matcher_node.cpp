@@ -3,6 +3,7 @@
 #include <minkindr_conversions/kindr_msg.h>
 #include <pcl_ros/point_cloud.h>
 #include <ros/ros.h>
+#include <std_srvs/Empty.h>
 #include <visualization_msgs/Marker.h>
 #include <visualization_msgs/MarkerArray.h>
 #include <voxblox/integrator/merge_integration.h>
@@ -95,15 +96,6 @@ class FreetureNode {
                    tsdf_layer_G, T_G_S);
   }
 
-  // TODO(mikexyl): there seems to be a compare funtion in open3d
-  bool resultBetter(const RegistrationResult& a, const RegistrationResult& b) {
-    if (a.fitness_ > b.fitness_)
-      return true;
-    else if (a.fitness_ == b.fitness_ && a.inlier_rmse_ < b.inlier_rmse_)
-      return true;
-    return false;
-  }
-
   void matchWithDatabase(const Layer<TsdfVoxel>& tsdf_layer,
                          const Transformation& T_G_S) {
     extractor_.extractFreetures(tsdf_layer);
@@ -111,32 +103,14 @@ class FreetureNode {
     auto const& features_q = extractor_.getFeatures();
     O3dFeature o3d_feature_q;
     if (!matcher_.featureMatrixToO3dFeature(features_q, &o3d_feature_q)) return;
-    std::vector<RegistrationResult> results;
-    RegistrationResult best_result;
-    int best_match_id = -1;
-    for (int i = 0; i < last_submap_id_; i++) {
-      auto const& submap = submap_db_[i];
 
-      RegistrationResult result;
-      matcher_.matchPointClouds(keypoints_q, o3d_feature_q, submap.keypoints,
-                                submap.features, &result);
-      if (resultBetter(result, best_result)) {
-        best_result = result;
-        best_match_id = i;
-      }
-    }
-    LOG(INFO) << "best_match_id: " << best_match_id;
+    matcher_.matchWithDatabase(keypoints_q, o3d_feature_q);
 
-    // Visualization
-    if (best_match_id >= 0 && o3d_visualize_) {
-      visualize_registration(keypoints_q, submap_db_[best_match_id].keypoints,
-                             best_result.transformation_);
-    }
     if (publish_keypoints_) publishKeypoints(keypoints_q);
     open3d::geometry::TriangleMesh mesh;
     o3dMeshFromTsdfLayer(tsdf_layer, 1, &mesh);
-    submap_db_.emplace(last_submap_id_++,
-                       MinSubmap(keypoints_q, o3d_feature_q, T_G_S, mesh));
+    matcher_.addSubmap(last_submap_id_++, keypoints_q, o3d_feature_q, T_G_S,
+                       mesh);
   }
 
   void publishKeypoints(const PointcloudV& keypoints) {
@@ -166,8 +140,6 @@ class FreetureNode {
 
   ros::Subscriber tsdf_map_sub_;
   ros::Publisher keypoints_pub_;
-
-  std::map<int, MinSubmap> submap_db_;
 
   std::future<void> match_async_handle_;
 

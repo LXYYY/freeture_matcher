@@ -20,4 +20,5 @@
         <depend>coxgraph_msgs</depend>
         <depend>visualization_msgs</depend>
         <depend>pcl_ros</depend>
+        <depend>dbow3_catkin</depend>
 </package>
