@@ -57,7 +57,7 @@ inline void setToZero<Eigen::Matrix3f>(Eigen::Matrix3f* in) {
 }
 
 typedef Eigen::Vector3d PointV;
-typedef std::vector<Eigen::Vector3d> PointcloudV;
+typedef std::vector<PointV> PointcloudV;
 typedef open3d::geometry::PointCloud O3dPointCloud;
 typedef open3d::registration::Feature O3dFeature;
 using Feature = Eigen::VectorXd;

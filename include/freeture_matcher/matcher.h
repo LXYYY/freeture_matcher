@@ -141,8 +141,7 @@ class Matcher {
     submap_db_.emplace(submap_id, MinSubmap(keypoints, features, T_G_S, mesh));
   }
 
-  void matchWithDatabase(const PointcloudV& keypoints_q,
-                         const O3dFeature features_q) {
+  void matchWithDatabase(PointcloudV keypoints_q, O3dFeature features_q) {
     if (config_.train_voc) return;
     std::vector<RegistrationResult> results;
     RegistrationResult best_result;

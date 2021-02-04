@@ -107,6 +107,7 @@ void FreetureExtractor::convolveVoxel(
     auto out_voxel = out_layer->getVoxelPtrByGlobalIndex(global_index);
     if (!ignore_invalid && !out_voxel->valid) continue;
 
+    std::lock_guard<std::mutex> lock(mutexes_.get(global_index));
     setToZero(&out_voxel->value);
     CHECK_EQ(kernel.cols(), offsets.size());
     for (unsigned int idx = 0; idx < offsets.size(); ++idx) {
