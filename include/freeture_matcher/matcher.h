@@ -34,6 +34,7 @@ class Matcher {
     int bow_voc_k = 10;
     int bow_voc_l = 6;
     bool use_dbow = false;
+    float min_local_fitness = 0.2;
 
     friend inline std::ostream& operator<<(std::ostream& s, const Config& v) {
       s << std::endl
@@ -49,6 +50,7 @@ class Matcher {
         << "  bow_voc_k: " << v.bow_voc_k << std::endl
         << "  bow_voc_l: " << v.bow_voc_l << std::endl
         << "  use_dbow: " << v.use_dbow << std::endl
+        << "  min_local_fitness: " << v.min_local_fitness << std::endl
         << "-------------------------------------------" << std::endl;
       return (s);
     }
@@ -70,6 +72,8 @@ class Matcher {
     nh_private.param("bow_voc_k", config.bow_voc_k, config.bow_voc_k);
     nh_private.param("bow_voc_l", config.bow_voc_l, config.bow_voc_l);
     nh_private.param("use_dbow", config.use_dbow, config.use_dbow);
+    nh_private.param("min_local_fitness", config.min_local_fitness,
+                     config.min_local_fitness);
     return config;
   }
 
@@ -135,35 +139,56 @@ class Matcher {
     return true;
   }
 
-  void addSubmap(int submap_id, const PointcloudV& keypoints,
+  void addSubmap(ros::Time stamp, const PointcloudV& keypoints,
                  const O3dFeature& features, const Transformation& T_G_S,
                  const open3d::geometry::TriangleMesh& mesh) {
-    submap_db_.emplace(submap_id, MinSubmap(keypoints, features, T_G_S, mesh));
+    submap_db_.emplace_back(MinSubmap(stamp, keypoints, features, T_G_S, mesh));
   }
 
-  void matchWithDatabase(PointcloudV keypoints_q, O3dFeature features_q) {
+  void matchWithDatabase(PointcloudV keypoints_q, O3dFeature features_q,
+                         const Layer<TsdfVoxel>& tsdf_layer,
+                         const Transformation& T_G_S, ros::Time stamp) {
     if (config_.train_voc) return;
-    std::vector<RegistrationResult> results;
-    RegistrationResult best_result;
-    int best_match_id = -1;
-    for (int i = 0; i < submap_db_.size(); i++) {
-      auto const& submap = submap_db_[i];
 
-      RegistrationResult result;
-      matchPointClouds(keypoints_q, features_q, submap.keypoints,
-                       submap.features, &result);
-      if (resultBetter(result, best_result)) {
-        best_result = result;
-        best_match_id = i;
+    if (submap_db_.size() > 0) {
+      if (config_.min_local_fitness) {
+        // Check if still in local window
+        auto last_submap = submap_db_.rbegin();
+        RegistrationResult local_result;
+        LOG(INFO) << "Fitness with last key submap: ";
+        matchPointClouds(keypoints_q, features_q, last_submap->keypoints,
+                         last_submap->features, &local_result);
+        if (local_result.fitness_ > config_.min_local_fitness) {
+          return;
+        }
+      }
+
+      std::vector<RegistrationResult> results;
+      RegistrationResult best_result;
+      int best_match_id = -1;
+      for (int i = 0; i < submap_db_.size(); i++) {
+        auto const& submap = submap_db_[i];
+
+        RegistrationResult result;
+        matchPointClouds(keypoints_q, features_q, submap.keypoints,
+                         submap.features, &result);
+        if (resultBetter(result, best_result)) {
+          best_result = result;
+          best_match_id = i;
+        }
+      }
+      LOG(INFO) << "best_match_id: " << best_match_id;
+
+      // Visualization
+      if (best_match_id >= 0 && config_.o3d_visualize) {
+        visualize_registration(keypoints_q, submap_db_[best_match_id].keypoints,
+                               best_result.transformation_);
       }
     }
-    LOG(INFO) << "best_match_id: " << best_match_id;
 
-    // Visualization
-    if (best_match_id >= 0 && config_.o3d_visualize) {
-      visualize_registration(keypoints_q, submap_db_[best_match_id].keypoints,
-                             best_result.transformation_);
-    }
+    open3d::geometry::TriangleMesh mesh;
+    o3dMeshFromTsdfLayer(tsdf_layer, 1, &mesh);
+    addSubmap(stamp, keypoints_q, features_q, T_G_S, mesh);
   }
 
   // TODO(mikexyl): there seems to be a compare funtion in open3d
@@ -183,7 +208,7 @@ class Matcher {
   std::shared_ptr<DBoW3::Database> db_;
   std::shared_ptr<DBoW3::Vocabulary> voc_;
 
-  std::map<int, MinSubmap> submap_db_;
+  std::vector<MinSubmap> submap_db_;
 
   ros::ServiceServer train_voc_srv_;
 
@@ -198,8 +223,8 @@ class Matcher {
 
     std::vector<cv::Mat> feature_cv_vec;
     uint64_t total_num = 0;
-    for (auto const& submap_kv : submap_db_) {
-      auto const& feature = submap_kv.second.features.data_;
+    for (auto const& submap : submap_db_) {
+      auto const& feature = submap.features.data_;
       cv::Mat feature_cv(cv::Size(feature.cols(), feature.rows()), CV_64F);
       cv::eigen2cv(feature, feature_cv);
       feature_cv_vec.emplace_back(feature_cv);

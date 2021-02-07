@@ -5,6 +5,7 @@
 #include <Open3D/Geometry/TriangleMesh.h>
 #include <Open3D/Registration/Feature.h>
 #include <Open3D/Registration/Registration.h>
+#include <ros/ros.h>
 #include <voxblox/core/common.h>
 #include <voxblox/core/voxel.h>
 
@@ -66,13 +67,15 @@ using RegistrationResult = open3d::registration::RegistrationResult;
 
 struct MinSubmap {
   MinSubmap() = default;
-  MinSubmap(const PointcloudV& _keypoints, O3dFeature _features,
-            const Transformation& _T_G_S,
+  MinSubmap(ros::Time _stamp, const PointcloudV& _keypoints,
+            O3dFeature _features, const Transformation& _T_G_S,
             const open3d::geometry::TriangleMesh& _mesh)
-      : keypoints(_keypoints),
+      : stamp(_stamp),
+        keypoints(_keypoints),
         features(_features),
         T_G_S(_T_G_S),
         mesh(_mesh) {}
+  ros::Time stamp;
   PointcloudV keypoints;
   O3dFeature features;
   Transformation T_G_S;

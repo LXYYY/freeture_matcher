@@ -31,8 +31,7 @@ class FreetureNode {
         nh_(nh),
         nh_private_(nh_private),
         o3d_visualize_(false),
-        layer_with_traj_(true),
-        last_submap_id_(0) {
+        layer_with_traj_(true) {
     nh_private.param("layer_with_traj", layer_with_traj_, layer_with_traj_);
     nh_private.param("o3d_visualize", o3d_visualize_, o3d_visualize_);
     nh_private.param("publish_keypoints", publish_keypoints_,
@@ -61,16 +60,17 @@ class FreetureNode {
     }
 
     kindr::minimal::QuatTransformationTemplate<double> T_G_S_D;
-    tf::poseMsgToKindr(
+    auto mid_pose =
         layer_msg.trajectory
-            .poses[static_cast<size_t>(layer_msg.trajectory.poses.size() / 2)]
-            .pose,
-        &T_G_S_D);
-    submapProcess(layer_msg.layer, T_G_S_D.cast<FloatingPoint>());
+            .poses[static_cast<size_t>(layer_msg.trajectory.poses.size() / 2)];
+    tf::poseMsgToKindr(mid_pose.pose, &T_G_S_D);
+    submapProcess(layer_msg.layer, T_G_S_D.cast<FloatingPoint>(),
+                  mid_pose.header.stamp);
   }
 
   void submapProcess(const voxblox_msgs::Layer& layer_msg,
-                     Transformation T_G_S = Transformation()) {
+                     Transformation T_G_S = Transformation(),
+                     ros::Time stamp = ros::Time::now()) {
     Layer<TsdfVoxel> tsdf_layer(layer_msg.voxel_size,
                                 layer_msg.voxels_per_side);
     if (!deserializeMsgToLayer(layer_msg, &tsdf_layer)) {
@@ -93,24 +93,21 @@ class FreetureNode {
 
     match_async_handle_ =
         std::async(std::launch::async, &FreetureNode::matchWithDatabase, this,
-                   tsdf_layer_G, T_G_S);
+                   tsdf_layer_G, T_G_S, stamp);
   }
 
   void matchWithDatabase(const Layer<TsdfVoxel>& tsdf_layer,
-                         const Transformation& T_G_S) {
+                         const Transformation& T_G_S, ros::Time stamp) {
     extractor_.extractFreetures(tsdf_layer);
     auto const& keypoints_q = extractor_.getKeypoints();
     auto const& features_q = extractor_.getFeatures();
     O3dFeature o3d_feature_q;
     if (!matcher_.featureMatrixToO3dFeature(features_q, &o3d_feature_q)) return;
 
-    matcher_.matchWithDatabase(keypoints_q, o3d_feature_q);
+    matcher_.matchWithDatabase(keypoints_q, o3d_feature_q, tsdf_layer, T_G_S,
+                               stamp);
 
     if (publish_keypoints_) publishKeypoints(keypoints_q);
-    open3d::geometry::TriangleMesh mesh;
-    o3dMeshFromTsdfLayer(tsdf_layer, 1, &mesh);
-    matcher_.addSubmap(last_submap_id_++, keypoints_q, o3d_feature_q, T_G_S,
-                       mesh);
   }
 
   void publishKeypoints(const PointcloudV& keypoints) {
@@ -144,8 +141,6 @@ class FreetureNode {
   std::future<void> match_async_handle_;
 
   std::string world_frame_;
-
-  int last_submap_id_;
 };
 }  // namespace voxblox
 
