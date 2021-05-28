@@ -15,8 +15,5 @@ include_directories(${Open3D_INCLUDE_DIRS})
 cs_add_library(${PROJECT_NAME} src/freeture_extractor.cpp)
 target_link_libraries(${PROJECT_NAME} ${Open3D_LIBRARIES})
 
-cs_add_executable(freeture_matcher_node src/freeture_matcher_node.cpp)
-target_link_libraries(freeture_matcher_node ${PROJECT_NAME})
-
 cs_install()
 cs_export()
