@@ -286,7 +286,8 @@ class FreetureExtractor {
 
     for (auto& thread : threads) thread.join();
 
-    LOG_IF(INFO, config_.verbose) << "finished compute first 2*n^2 descriptor";
+    LOG_IF(INFO, config_.verbose)
+        << "finished compute descriptor dim: " << features_[0].size();
 
     threads.clear();
     for (size_t i = 0; i < bunches.size(); i++)

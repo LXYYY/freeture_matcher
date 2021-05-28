@@ -141,15 +141,19 @@ class Matcher {
 
   void addSubmap(ros::Time stamp, const PointcloudV& keypoints,
                  const O3dFeature& features, const Transformation& T_G_S,
-                 const open3d::geometry::TriangleMesh& mesh) {
+                 const open3d::geometry::TriangleMesh& mesh =
+                     open3d::geometry::TriangleMesh()) {
     submap_db_.emplace_back(MinSubmap(stamp, keypoints, features, T_G_S, mesh));
   }
 
-  void matchWithDatabase(PointcloudV keypoints_q, O3dFeature features_q,
-                         const Layer<TsdfVoxel>& tsdf_layer,
-                         const Transformation& T_G_S, ros::Time stamp) {
-    if (config_.train_voc) return;
+  LoopClosure::Ptr matchWithDatabase(const PointcloudV& keypoints_q,
+                                     const O3dFeature& features_q,
+                                     const Layer<TsdfVoxel>& tsdf_layer,
+                                     const Transformation& T_G_S,
+                                     ros::Time stamp) {
+    if (config_.train_voc) return nullptr;
 
+    LoopClosure::Ptr loop_closure = nullptr;
     if (submap_db_.size() > 0) {
       if (config_.min_local_fitness) {
         // Check if still in local window
@@ -159,7 +163,7 @@ class Matcher {
         matchPointClouds(keypoints_q, features_q, last_submap->keypoints,
                          last_submap->features, &local_result);
         if (local_result.fitness_ > config_.min_local_fitness) {
-          return;
+          return nullptr;
         }
       }
 
@@ -184,11 +188,18 @@ class Matcher {
         visualize_registration(keypoints_q, submap_db_[best_match_id].keypoints,
                                best_result.transformation_);
       }
+
+      loop_closure.reset(new LoopClosure());
+      loop_closure->from_stamp = stamp;
+      loop_closure->to_stamp = submap_db_[best_match_id].stamp;
+      Transformation::TransformationMatrix tf_mat(
+          best_result.transformation_.cast<FloatingPoint>());
+      Transformation transform(tf_mat);
+      loop_closure->transform = transform;
     }
 
-    open3d::geometry::TriangleMesh mesh;
-    o3dMeshFromTsdfLayer(tsdf_layer, 1, &mesh);
-    addSubmap(stamp, keypoints_q, features_q, T_G_S, mesh);
+    addSubmap(stamp, keypoints_q, features_q, T_G_S);
+    return loop_closure;
   }
 
   // TODO(mikexyl): there seems to be a compare funtion in open3d

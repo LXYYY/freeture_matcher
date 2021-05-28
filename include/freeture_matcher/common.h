@@ -5,9 +5,11 @@
 #include <Open3D/Geometry/TriangleMesh.h>
 #include <Open3D/Registration/Feature.h>
 #include <Open3D/Registration/Registration.h>
+#include <minkindr_conversions/kindr_msg.h>
 #include <ros/ros.h>
 #include <voxblox/core/common.h>
 #include <voxblox/core/voxel.h>
+#include <voxgraph_msgs/LoopClosure.h>
 
 #include <set>
 #include <vector>
@@ -80,6 +82,22 @@ struct MinSubmap {
   O3dFeature features;
   Transformation T_G_S;
   open3d::geometry::TriangleMesh mesh;
+};
+
+struct LoopClosure {
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+  typedef std::shared_ptr<LoopClosure> Ptr;
+
+  ros::Time from_stamp;
+  ros::Time to_stamp;
+  Transformation transform;
+  void toMsg(voxgraph_msgs::LoopClosure* msg) {
+    CHECK_NOTNULL(msg);
+    msg->from_timestamp = from_stamp;
+    msg->to_timestamp = to_stamp;
+    tf::transformKindrToMsg(transform.cast<double>(), &msg->transform);
+  }
 };
 }  // namespace voxblox
 

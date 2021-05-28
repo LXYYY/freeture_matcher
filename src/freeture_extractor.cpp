@@ -8,11 +8,13 @@ void FreetureExtractor::extractFreetures(const Layer<TsdfVoxel>& tsdf_layer) {
   Layer<DistVoxel> dist_gauss_layer(tsdf_layer.voxel_size(),
                                     tsdf_layer.voxels_per_side());
   computeGaussianDistance(tsdf_layer, &dist_gauss_layer);
-
   Layer<GradVoxel> grad_layer(tsdf_layer.voxel_size(),
                               tsdf_layer.voxels_per_side());
   computeGradient(dist_gauss_layer, &grad_layer);
   computeHessian(tsdf_layer, grad_layer);
+  LOG(INFO) << "layers memory: "
+            << dist_gauss_layer.getMemorySize() + tsdf_layer.getMemorySize() +
+                   grad_layer.getMemorySize();
 }
 
 void FreetureExtractor::computeGaussianDistance(

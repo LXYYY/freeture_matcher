@@ -36,6 +36,8 @@ class FreetureNode {
     nh_private.param("o3d_visualize", o3d_visualize_, o3d_visualize_);
     nh_private.param("publish_keypoints", publish_keypoints_,
                      publish_keypoints_);
+    nh_private.param("world_frame", world_frame_, world_frame_);
+
     if (layer_with_traj_)
       tsdf_map_sub_ = nh_private_.subscribe(
           "tsdf_map_in", 10, &FreetureNode::layerWithTrajCallback, this);
@@ -46,7 +48,11 @@ class FreetureNode {
     if (publish_keypoints_)
       keypoints_pub_ = nh_private_.advertise<visualization_msgs::Marker>(
           "keypoints", 10, true);
+
+    loop_closure_pub_ = nh_private_.advertise<voxgraph_msgs::LoopClosure>(
+        "loop_closure", 10, true);
   }
+
   virtual ~FreetureNode() = default;
 
   void layerCallback(const voxblox_msgs::Layer& layer_msg) {
@@ -57,6 +63,7 @@ class FreetureNode {
       const voxblox_msgs::LayerWithTrajectory& layer_msg) {
     if (layer_msg.trajectory.poses.empty()) {
       ROS_WARN_STREAM("Received a submap without trajectory");
+      return;
     }
 
     kindr::minimal::QuatTransformationTemplate<double> T_G_S_D;
@@ -75,6 +82,7 @@ class FreetureNode {
                                 layer_msg.voxels_per_side);
     if (!deserializeMsgToLayer(layer_msg, &tsdf_layer)) {
       ROS_WARN("Received a submap msg with an invalid TSDF");
+      return;
     } else {
       ROS_INFO("Received a valid tsdf map");
     }
@@ -101,26 +109,44 @@ class FreetureNode {
     extractor_.extractFreetures(tsdf_layer);
     auto const& keypoints_q = extractor_.getKeypoints();
     auto const& features_q = extractor_.getFeatures();
+    LOG(INFO) << "Keypoints size: " << keypoints_q.size();
+    LOG(INFO) << "features size: " << features_q.size();
     O3dFeature o3d_feature_q;
     if (!matcher_.featureMatrixToO3dFeature(features_q, &o3d_feature_q)) return;
+    if (publish_keypoints_)
+      publishKeypoints(keypoints_q, T_G_S, tsdf_layer.voxel_size());
 
-    matcher_.matchWithDatabase(keypoints_q, o3d_feature_q, tsdf_layer, T_G_S,
-                               stamp);
-
-    if (publish_keypoints_) publishKeypoints(keypoints_q);
+    LoopClosure::Ptr loop_closure;
+    loop_closure = matcher_.matchWithDatabase(keypoints_q, o3d_feature_q,
+                                              tsdf_layer, T_G_S, stamp);
+    if (loop_closure) {
+      voxgraph_msgs::LoopClosure loop_closure_msg;
+      loop_closure->toMsg(&loop_closure_msg);
+      loop_closure_pub_.publish(loop_closure_msg);
+    }
   }
 
-  void publishKeypoints(const PointcloudV& keypoints) {
+  void publishKeypoints(const PointcloudV& keypoints,
+                        const Transformation& T_G_S, float voxel_size) {
     visualization_msgs::Marker kp_marker;
+    kp_marker.header.frame_id = world_frame_;
     kp_marker.type = visualization_msgs::Marker::POINTS;
     kp_marker.scale.x = 0.1;
     kp_marker.scale.y = 0.1;
     for (auto const& kp : keypoints) {
+      auto kp_G = T_G_S.cast<double>() * kp * voxel_size;
+      LOG(INFO) << kp_G << std::endl << kp;
       geometry_msgs::Point kp_msg;
-      kp_msg.x = kp.x();
-      kp_msg.y = kp.y();
-      kp_msg.z = kp.z();
+      kp_msg.x = kp_G.x();
+      kp_msg.y = kp_G.y();
+      kp_msg.z = kp_G.z();
       kp_marker.points.emplace_back(kp_msg);
+      std_msgs::ColorRGBA color;
+      color.r = 255;
+      color.g = 0;
+      color.b = 0;
+      color.a = 1;
+      kp_marker.colors.emplace_back(color);
     }
     keypoints_pub_.publish(kp_marker);
   }
@@ -134,9 +160,9 @@ class FreetureNode {
 
   ros::NodeHandle nh_;
   ros::NodeHandle nh_private_;
-
   ros::Subscriber tsdf_map_sub_;
   ros::Publisher keypoints_pub_;
+  ros::Publisher loop_closure_pub_;
 
   std::future<void> match_async_handle_;
 
