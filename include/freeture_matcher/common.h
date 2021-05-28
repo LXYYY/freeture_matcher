@@ -11,6 +11,7 @@
 #include <voxblox/core/voxel.h>
 #include <voxgraph_msgs/LoopClosure.h>
 
+#include <memory>
 #include <set>
 #include <vector>
 

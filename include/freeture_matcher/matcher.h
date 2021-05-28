@@ -10,6 +10,7 @@
 #include <ros/ros.h>
 #include <opencv2/core/eigen.hpp>
 
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <string>
