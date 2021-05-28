@@ -3,14 +3,18 @@
 namespace voxblox {
 
 void FreetureExtractor::extractFreetures(const Layer<TsdfVoxel>& tsdf_layer) {
+  keypoints_.clear();
+  features_.clear();
   Layer<DistVoxel> dist_gauss_layer(tsdf_layer.voxel_size(),
                                     tsdf_layer.voxels_per_side());
   computeGaussianDistance(tsdf_layer, &dist_gauss_layer);
-
   Layer<GradVoxel> grad_layer(tsdf_layer.voxel_size(),
                               tsdf_layer.voxels_per_side());
   computeGradient(dist_gauss_layer, &grad_layer);
   computeHessian(tsdf_layer, grad_layer);
+  LOG(INFO) << "layers memory: "
+            << dist_gauss_layer.getMemorySize() + tsdf_layer.getMemorySize() +
+                   grad_layer.getMemorySize();
 }
 
 void FreetureExtractor::computeGaussianDistance(
@@ -105,6 +109,7 @@ void FreetureExtractor::convolveVoxel(
     auto out_voxel = out_layer->getVoxelPtrByGlobalIndex(global_index);
     if (!ignore_invalid && !out_voxel->valid) continue;
 
+    std::lock_guard<std::mutex> lock(mutexes_.get(global_index));
     setToZero(&out_voxel->value);
     CHECK_EQ(kernel.cols(), offsets.size());
     for (unsigned int idx = 0; idx < offsets.size(); ++idx) {

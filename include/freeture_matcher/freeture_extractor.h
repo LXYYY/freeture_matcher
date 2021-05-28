@@ -8,8 +8,10 @@
 #include <voxblox_ros/ros_params.h>
 
 #include <math.h>
+#include <algorithm>
 #include <functional>
 #include <limits>
+#include <list>
 #include <vector>
 
 #include "freeture_matcher/common.h"
@@ -22,6 +24,7 @@ class FreetureExtractor {
     int radius_feature = 15;
     int n_div = 10;
     int radius_local_extremum = 15;
+    int n_threads = 8;
   };
 
   friend inline std::ostream& operator<<(std::ostream& s, const Config& v) {
@@ -31,6 +34,7 @@ class FreetureExtractor {
       << "  radius_feature: " << v.radius_feature << std::endl
       << "  n_div: " << v.n_div << std::endl
       << "  radius_local_extremum: " << v.radius_local_extremum << std::endl
+      << "  n_threads: " << v.n_threads << std::endl
       << "-------------------------------------------" << std::endl;
     return (s);
   }
@@ -43,6 +47,7 @@ class FreetureExtractor {
     nh_private.param("n_div", config.n_div, config.n_div);
     nh_private.param("radius_local_extremum", config.radius_local_extremum,
                      config.radius_local_extremum);
+    nh_private.param("n_threads", config.n_threads, config.n_threads);
     return config;
   }
 
@@ -266,27 +271,58 @@ class FreetureExtractor {
     LOG_IF(INFO, config_.verbose)
         << "detected keypoints " << keypoint_ids.size();
 
+    int bunch_size = keypoint_ids.size() / config_.n_threads;
+    std::vector<LongIndexSet> bunches;
+    for (size_t i = 0; i < keypoint_ids.size(); i += bunch_size) {
+      auto last = std::min(keypoint_ids.size(), i + bunch_size);
+      bunches.emplace_back(std::next(keypoint_ids.begin(), i),
+                           std::next(keypoint_ids.begin(), last));
+    }
+
+    std::list<std::thread> threads;
+    for (size_t i = 0; i < bunches.size(); i++)
+      threads.emplace_back(&FreetureExtractor::computeDescriptors, this,
+                           grad_layer, &sk_layer, bunches[i]);
+
+    for (auto& thread : threads) thread.join();
+
+    LOG_IF(INFO, config_.verbose)
+        << "finished compute descriptor dim: " << features_[0].size();
+
+    threads.clear();
+    for (size_t i = 0; i < bunches.size(); i++)
+      threads.emplace_back(&FreetureExtractor::augumentDescriptors, this,
+                           tsdf_layer, &sk_layer, bunches[i]);
+
+    for (auto& thread : threads) thread.join();
+
+    LOG_IF(INFO, config_.verbose)
+        << "finished compute dist and class descriptor " << features_.size();
+  }
+
+  void computeDescriptors(const Layer<GradVoxel>& grad_layer,
+                          Layer<SkVoxel>* sk_layer,
+                          const LongIndexSet& keypoint_ids) {
     convolveVoxel<GradVoxel, SkVoxel, KernelX>(
-        grad_layer, &sk_layer, keypoint_ids, kFeatureGaussianKernel,
+        grad_layer, sk_layer, keypoint_ids, kFeatureGaussianKernel,
         kFeatureOffset,
         std::bind(&FreetureExtractor::convSk, this, std::placeholders::_1,
                   std::placeholders::_2, std::placeholders::_3),
         std::bind(&FreetureExtractor::postEigen, this, std::placeholders::_1,
                   std::placeholders::_2));
+  }
 
-    LOG_IF(INFO, config_.verbose) << "finished compute first 2*n^2 descriptor";
-
+  void augumentDescriptors(const Layer<TsdfVoxel>& tsdf_layer,
+                           Layer<SkVoxel>* sk_layer,
+                           const LongIndexSet& keypoint_ids) {
     convolveVoxel<TsdfVoxel, SkVoxel, KernelX>(
-        tsdf_layer, &sk_layer, keypoint_ids, kFeatureGaussianKernel,
+        tsdf_layer, sk_layer, keypoint_ids, kFeatureGaussianKernel,
         kFeatureOffset,
         std::bind(&FreetureExtractor::convAugDescriptor, this,
                   std::placeholders::_1, std::placeholders::_2,
                   std::placeholders::_3),
         std::bind(&FreetureExtractor::postAugDescriptor, this,
                   std::placeholders::_1, std::placeholders::_2));
-
-    LOG_IF(INFO, config_.verbose)
-        << "finished compute dist and class descriptor " << features_.size();
   }
 
   template <typename VoxelT>
@@ -493,9 +529,14 @@ class FreetureExtractor {
     descriptor[descriptor.size() - 1] =
         (eigen_values.array() > 0).sum() * kAlphaClass;
 
-    keypoints_.emplace_back(global_index.cast<double>());
     in->descriptor_id = features_.size();
-    features_.emplace_back(descriptor);
+    addKeypointAndFeature(global_index.cast<double>(), descriptor);
+  }
+
+  void addKeypointAndFeature(const PointV& point, const Feature& feature) {
+    std::lock_guard<std::mutex> lock(keypoints_feature_update_mutex_);
+    keypoints_.emplace_back(point);
+    features_.emplace_back(feature);
   }
 
   void descSoftBinning(int azi_id, float azi_rem, int pol_id, float pol_rem,
@@ -514,8 +555,14 @@ class FreetureExtractor {
         mag * azi_rem / kAngleDivision * pol_rem / kAngleDivision;
   }
 
-  auto const& getKeypoints() const { return keypoints_; }
-  auto const& getFeatures() const { return features_; }
+  auto const& getKeypoints() {
+    std::lock_guard<std::mutex> lock(keypoints_feature_update_mutex_);
+    return keypoints_;
+  }
+  auto const& getFeatures() {
+    std::lock_guard<std::mutex> lock(keypoints_feature_update_mutex_);
+    return features_;
+  }
 
   PointcloudV keypoints_;
   FeatureMatrix features_;
@@ -528,6 +575,9 @@ class FreetureExtractor {
   Eigen::VectorXd kSolidAngle;
 
   GlobalIndexVector kLocalMaxOffset;
+
+  ApproxHashArray<12, std::mutex, GlobalIndex, LongIndexHash> mutexes_;
+  std::mutex keypoints_feature_update_mutex_;
 
   static const Kernel3 kGaussKernel;
   static const Kernel3 kSobelKernel;
