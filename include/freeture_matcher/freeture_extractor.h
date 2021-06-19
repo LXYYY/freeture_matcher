@@ -1,8 +1,6 @@
 #ifndef INCLUDE_FREETURE_MATCHER_FREETURE_EXTRACTOR_H_
 #define INCLUDE_FREETURE_MATCHER_FREETURE_EXTRACTOR_H_
 
-#include <Open3D/Geometry/PointCloud.h>
-#include <Open3D/Registration/Feature.h>
 #include <ros/ros.h>
 #include <voxblox/integrator/esdf_integrator.h>
 #include <voxblox_ros/ros_params.h>
@@ -363,6 +361,7 @@ class FreetureExtractor {
           continue;
         }
 
+        grad_voxel.valid = false;
         grad_voxel.value.setZero();
 
         VoxelIndex voxel_index =
@@ -379,8 +378,8 @@ class FreetureExtractor {
 
           const DistVoxel* neighbor_voxel =
               dist_layer.getVoxelPtrByGlobalIndex(neighbor_index);
-          if (!neighbor_voxel || !neighbor_voxel->valid) {
-            grad_voxel.valid = false;
+          if (neighbor_voxel && neighbor_voxel->valid) {
+            grad_voxel.valid = true;
             break;
           } else {
             CHECK_EQ(neighbor_voxel->value, neighbor_voxel->value);

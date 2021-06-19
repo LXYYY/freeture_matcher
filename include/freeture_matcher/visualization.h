@@ -1,8 +1,6 @@
 #ifndef INCLUDE_FREETURE_MATCHER_VISUALIZATION_H_
 #define INCLUDE_FREETURE_MATCHER_VISUALIZATION_H_
 
-#include <Open3D/Geometry/TriangleMesh.h>
-#include <Open3D/Visualization/Utility/DrawGeometry.h>
 #include <voxblox/core/common.h>
 #include <voxblox/core/layer.h>
 #include <voxblox/interpolator/interpolator.h>

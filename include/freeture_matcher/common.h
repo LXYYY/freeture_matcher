@@ -1,10 +1,6 @@
 #ifndef INCLUDE_FREETURE_MATCHER_COMMON_H_
 #define INCLUDE_FREETURE_MATCHER_COMMON_H_
 
-#include <Open3D/Geometry/PointCloud.h>
-#include <Open3D/Geometry/TriangleMesh.h>
-#include <Open3D/Registration/Feature.h>
-#include <Open3D/Registration/Registration.h>
 #include <minkindr_conversions/kindr_msg.h>
 #include <ros/ros.h>
 #include <voxblox/core/common.h>
@@ -61,29 +57,8 @@ inline void setToZero<Eigen::Matrix3f>(Eigen::Matrix3f* in) {
 
 typedef Eigen::Vector3d PointV;
 typedef std::vector<PointV> PointcloudV;
-typedef open3d::geometry::PointCloud O3dPointCloud;
-typedef open3d::registration::Feature O3dFeature;
 using Feature = Eigen::VectorXd;
 using FeatureMatrix = AlignedVector<Eigen::VectorXd>;
-using RegistrationResult = open3d::registration::RegistrationResult;
-
-struct MinSubmap {
-  MinSubmap() = default;
-  MinSubmap(ros::Time _stamp, const PointcloudV& _keypoints,
-            O3dFeature _features, const Transformation& _T_G_S,
-            const open3d::geometry::TriangleMesh& _mesh)
-      : stamp(_stamp),
-        keypoints(_keypoints),
-        features(_features),
-        T_G_S(_T_G_S),
-        mesh(_mesh) {}
-  ros::Time stamp;
-  PointcloudV keypoints;
-  O3dFeature features;
-  Transformation T_G_S;
-  open3d::geometry::TriangleMesh mesh;
-};
-
 }  // namespace voxblox
 
 #endif  // INCLUDE_FREETURE_MATCHER_COMMON_H_
